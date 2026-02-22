@@ -1,0 +1,30 @@
+# Rust/Cargo build artifacts (can become very large)
+/target/
+/target2/
+
+# Local temporary workspace
+/.tmp/
+
+# Local assistant/editor state
+/.claude/
+
+# Profiling/coverage artifacts
+*.profraw
+*.profdata
+*.gcda
+*.gcno
+
+# Python local env/cache (oracle tooling)
+/oracle/.venv/
+/oracle/__pycache__/
+/oracle/.pytest_cache/
+/oracle/.mypy_cache/
+/oracle/.ruff_cache/
+
+# IDE/OS noise
+/.idea/
+/.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

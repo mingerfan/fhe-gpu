@@ -1,0 +1,17 @@
+[package]
+name        = "ckks"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+fhe-math     = { workspace = true }
+concrete-ntt = { workspace = true }
+rustfft      = { workspace = true }
+num-complex  = { workspace = true }
+rand         = { workspace = true }
+rand_chacha  = { workspace = true }
+serde        = { workspace = true }
+thiserror    = { workspace = true }
+
+[dev-dependencies]
+fhe-testing = { workspace = true }

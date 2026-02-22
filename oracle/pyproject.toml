@@ -1,0 +1,15 @@
+[project]
+name = "fhe-oracle"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = ["openfhe>=1.4"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = ["pytest>=8"]

@@ -1,0 +1,11 @@
+[package]
+name        = "fhe-testing"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ckks        = { workspace = true }
+fhe-math    = { workspace = true }
+rand        = { workspace = true }
+rand_chacha = { workspace = true }
+num-complex = { workspace = true }

@@ -1,0 +1,81 @@
+[workspace]
+resolver = "2"
+members = [
+    ".",                     # root package owns the tests/
+    "crates/fhe-math",
+    "crates/ckks",
+    "crates/fhe-ir",
+    "crates/fhe-compiler",
+    "crates/fhe-testing",
+]
+
+[workspace.package]
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.78"
+license      = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+# Internal crates
+fhe-math     = { path = "crates/fhe-math" }
+ckks         = { path = "crates/ckks" }
+fhe-ir       = { path = "crates/fhe-ir" }
+fhe-compiler = { path = "crates/fhe-compiler" }
+fhe-testing  = { path = "crates/fhe-testing" }
+
+# Math / NTT
+concrete-ntt = "0.2"
+num-complex  = { version = "0.4", features = ["serde"] }
+rustfft      = "6"
+
+# Randomness
+rand         = "0.8"
+rand_chacha  = "0.3"
+
+# Serialization
+serde        = { version = "1", features = ["derive"] }
+serde_json   = "1"
+
+# Graphs
+petgraph     = { version = "0.6", features = ["serde-1"] }
+
+# Error handling
+thiserror    = "1"
+anyhow       = "1"
+
+# Testing
+proptest     = "1"
+
+# ────────────────────────────────────────────────────────────
+# Root package (owns integration tests in tests/)
+# ────────────────────────────────────────────────────────────
+[package]
+name    = "fhe-workspace"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[features]
+default        = []
+phase-math     = []   # unlock fhe-math integration tests
+phase-encoding = []   # unlock encoding integration tests
+phase-crypto   = []   # unlock crypto integration tests
+phase-eval     = []   # unlock eval integration tests
+difftest       = []   # unlock differential tests (requires uv + openfhe)
+
+[dev-dependencies]
+ckks         = { workspace = true }
+fhe-ir       = { workspace = true }
+fhe-compiler = { workspace = true }
+fhe-testing  = { workspace = true }
+num-complex  = { workspace = true }
+rand         = { workspace = true }
+rand_chacha  = { workspace = true }
+
+[profile.dev]
+opt-level = 1   # enough for NTT not to be painfully slow
+
+[profile.release]
+opt-level     = 3
+lto           = "thin"
+codegen-units = 1

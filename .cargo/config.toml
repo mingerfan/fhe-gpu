@@ -1,0 +1,16 @@
+[build]
+# Use all available cores for faster parallel compilation
+# jobs = 0  # Uncomment to set explicitly; 0 = auto on some toolchains
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "target-cpu=native"]
+
+[lints.rust]
+unused_results = "warn"
+
+[lints.clippy]
+pedantic          = { level = "warn", priority = -1 }
+# Allow common patterns that are fine in this project
+module_name_repetitions = "allow"
+must_use_candidate      = "allow"
+missing_panics_doc      = "allow"

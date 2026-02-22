@@ -1,0 +1,13 @@
+[package]
+name        = "fhe-ir"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde      = { workspace = true }
+serde_json = { workspace = true }
+petgraph   = { workspace = true }
+thiserror  = { workspace = true }
+
+[dev-dependencies]
+fhe-testing = { workspace = true }
