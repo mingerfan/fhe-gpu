@@ -18,14 +18,22 @@ use crate::MathError;
 pub fn mod_add(a: u64, b: u64, m: u64) -> u64 {
     debug_assert!(a < m && b < m, "inputs must be reduced mod m");
     let s = a + b;
-    if s >= m { s - m } else { s }
+    if s >= m {
+        s - m
+    } else {
+        s
+    }
 }
 
 /// Compute `(a - b) mod m`.
 #[inline]
 pub fn mod_sub(a: u64, b: u64, m: u64) -> u64 {
     debug_assert!(a < m && b < m, "inputs must be reduced mod m");
-    if a >= b { a - b } else { a + m - b }
+    if a >= b {
+        a - b
+    } else {
+        a + m - b
+    }
 }
 
 /// Compute `(a * b) mod m` using 128-bit intermediate.
@@ -90,7 +98,8 @@ pub fn mod_inv(a: u64, m: u64) -> u64 {
 ///
 /// # Mathematical Specification
 /// ```text
-/// Given modulus m, precompute: k = ceil(log2(m)), magic = floor(2^(2k) / m)
+/// Given modulus m, input x, 0 < x < m^2, m is not power of 2,
+/// precompute: k = ceil(log2(m)), magic = floor(2^(2k) / m)
 ///
 /// barrett_reduce(x):
 ///   q  = (x * magic) >> (2k)      -- approximation of floor(x / m)
@@ -98,27 +107,33 @@ pub fn mod_inv(a: u64, m: u64) -> u64 {
 ///   if r >= m: r -= m             -- correction step
 ///   return r
 /// ```
-///
 /// # Learning Resources
 /// - [EN] Barrett reduction (Wikipedia): https://en.wikipedia.org/wiki/Barrett_reduction
-/// - [EN] Handbook of Applied Cryptography §14.3.3: https://cacr.uwaterloo.ca/hac/about/chap14.pdf
-/// - [CN] Barrett 约简（知乎）: N/A
+/// - [CN] Barrett 约简（知乎）: https://zhuanlan.zhihu.com/p/621388087
 /// - [CN] 高效模运算（CSDN）: N/A
 pub struct BarrettReducer {
     pub modulus: u64,
-    /// `floor(2^128 / modulus)` — the Barrett "magic" constant
     magic: u128,
-    /// shift = 64 (we use 128-bit arithmetic with 64-bit modulus)
-    _shift: u32,
+    shift: u32,
 }
 
 impl BarrettReducer {
     /// Create a new Barrett reducer for `modulus`.
     pub fn new(modulus: u64) -> Self {
-        // For 64-bit modulus: magic = floor(2^128 / m)
-        // We use u128 division: magic = u128::MAX / modulus + 1 (approximate)
-        let magic = (u128::MAX / modulus as u128).wrapping_add(1);
-        Self { modulus, magic, _shift: 64 }
+        // 安全断言：避免 x * magic 溢出 u128（要求 3k+1 ≤ 128，即 k ≤ 42）
+        assert!(
+            modulus < (1u64 << 42),
+            "BarrettReducer: modulus must be < 2^42, got {modulus}. \
+             For larger moduli use mod_mul() which uses u128 division."
+        );
+        // k = bit length of modulus = floor(log2(m)) + 1，用位运算精确计算
+        let k = 64 - modulus.leading_zeros();
+        let magic = (1u128 << (2 * k)) / modulus as u128;
+        Self {
+            modulus,
+            magic,
+            shift: k,
+        }
     }
 
     /// Reduce `x` modulo `self.modulus`.
@@ -127,10 +142,16 @@ impl BarrettReducer {
     /// `x` must satisfy `x < modulus^2` for the approximation to be correct.
     ///
     /// # Learning Resources
-    /// - [EN] Barrett reduction implementation notes: N/A
+    /// - [EN] Barrett reduction implementation notes: N/A §2
     /// - [CN] Barrett 约简实现要点: N/A
     pub fn reduce(&self, x: u128) -> u64 {
-        todo!("Barrett reduce: q = (x * magic) >> 128, then correct by at most one subtraction")
+        let q = (x * self.magic) >> (self.shift * 2);
+        let rem = (x - q * self.modulus as u128) as u64;
+        if rem >= self.modulus {
+            rem - self.modulus
+        } else {
+            rem
+        }
     }
 
     /// Compute `(a * b) mod self.modulus` using Barrett reduction.
@@ -332,7 +353,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "implement BarrettReducer::reduce first"]
     fn test_barrett_reduce() {
         let m = 998_244_353u64;
         let reducer = BarrettReducer::new(m);
