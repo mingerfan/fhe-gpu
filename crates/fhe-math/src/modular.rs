@@ -7,6 +7,8 @@
 //! - `barrett_reduce` — Barrett reduction for repeated reduction with fixed modulus
 //! - `MontgomeryInt` — Montgomery form integers for efficient modular multiplication
 
+use std::backtrace;
+
 use crate::MathError;
 
 // ────────────────────────────────────────────────────────────
@@ -70,6 +72,7 @@ pub fn mod_pow(mut base: u64, mut exp: u64, m: u64) -> u64 {
 }
 
 /// Compute the modular inverse of `a` modulo prime `m`.
+/// 注意：这个只能用在素数模上，如果不是素数模是不对的！
 ///
 /// # Mathematical Specification
 /// ```text
@@ -85,6 +88,39 @@ pub fn mod_pow(mut base: u64, mut exp: u64, m: u64) -> u64 {
 pub fn mod_inv(a: u64, m: u64) -> u64 {
     assert_ne!(a, 0, "0 has no modular inverse");
     mod_pow(a, m - 2, m)
+}
+
+/// 扩展欧几里得算法
+/// # Learning Resources
+/// - [EN] Computing m' via extended GCD: https://cp-algorithms.com/algebra/extended-euclid-algorithm.html
+/// - [CN] 扩展欧几里得算法（OI-Wiki）: https://oi-wiki.org/math/number-theory/gcd
+pub fn extend_gcd(a: u64, b: u64) -> (u64, i128, i128) {
+    if b == 0 {
+        return (a, 1, 0);
+    }
+
+    let (res, x1, y1) = extend_gcd(b, a % b);
+    let q = (a / b) as i128;
+
+    (res, y1, x1 - q * y1)
+}
+
+/// 实现更加通用的模逆
+/// 使用扩展欧几里得算法
+pub fn general_mod_inv(a: u64, m: u64) -> Option<u64> {
+    if m <= 1 {
+        return None;
+    }
+
+    let a = a % m;
+    let (gcd, x, _) = extend_gcd(a, m);
+
+    if gcd != 1 {
+        // 不互素，计算模逆有问题
+        None
+    } else {
+        Some(x.rem_euclid(m as i128) as u64)
+    }
 }
 
 // ────────────────────────────────────────────────────────────
@@ -176,7 +212,7 @@ impl BarrettReducer {
 /// Montgomery parameters (for 64-bit modulus m, m odd):
 ///   R    = 2^64
 ///   R2   = R^2 mod m          (precomputed once)
-///   m'   = -m^{-1} mod 2^64   (precomputed once, computed by extended GCD)
+///   m'   = -m^{-1} mod R   (precomputed once, computed by extended GCD)
 ///
 /// Enter Montgomery form:
 ///   a̅ = REDC(a * R2)          where REDC is Montgomery reduction
@@ -194,8 +230,8 @@ impl BarrettReducer {
 /// # Learning Resources
 /// - [EN] Montgomery modular multiplication (Wikipedia): https://en.wikipedia.org/wiki/Montgomery_modular_multiplication
 /// - [EN] Fast Montgomery multiplication (Koç et al.): N/A
-/// - [CN] Montgomery 算法（知乎详解）: N/A
-/// - [CN] Montgomery 乘法实现（OI-Wiki）: https://oi-wiki.org/math/montgomery/
+/// - [CN] Montgomery 算法（知乎详解）: https://zhuanlan.zhihu.com/p/581656171
+/// - [CN] Montgomery 乘法实现（OI-Wiki）: N/A
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MontgomeryInt {
     /// Value stored as `x * R mod m`.
@@ -219,11 +255,10 @@ impl MontgomeryParams {
     /// # Panics
     /// Panics if `modulus` is even (Montgomery requires odd modulus).
     ///
-    /// # Learning Resources
-    /// - [EN] Computing m' via extended GCD: https://cp-algorithms.com/algebra/extended-euclid-algorithm.html
-    /// - [CN] 扩展欧几里得算法（OI-Wiki）: https://oi-wiki.org/math/ext-gcd/
     pub fn new(modulus: u64) -> Self {
         assert!(modulus & 1 == 1, "Montgomery modulus must be odd");
+        let r2 = ((u64::MAX as u128) + 1) % modulus as u128;
+        // 实现扩展欧几里得算法
         todo!("compute r2 = R^2 mod m and m_prime = -m^{{-1}} mod 2^64 using iterative method")
     }
 
@@ -340,6 +375,47 @@ mod tests {
         let a = 123456789u64;
         let inv = mod_inv(a, p);
         assert_eq!(mod_mul(a, inv, p), 1);
+    }
+
+    #[test]
+    fn test_extend_gcd_bezout_identity() {
+        let (g, x, y) = extend_gcd(240, 46);
+        assert_eq!(g, 2);
+        assert_eq!(240i128 * x + 46i128 * y, g as i128);
+
+        let (g, x, y) = extend_gcd(3, 11);
+        assert_eq!(g, 1);
+        assert_eq!(3i128 * x + 11i128 * y, g as i128);
+    }
+
+    #[test]
+    fn test_general_mod_inv_exists_and_normalized() {
+        assert_eq!(general_mod_inv(3, 11), Some(4));
+        assert_eq!(general_mod_inv(10, 17), Some(12));
+        assert_eq!(general_mod_inv(14, 3), Some(2));
+
+        let pairs = [(3u64, 11u64), (10, 17), (14, 3), (123456789, 998244353)];
+        for (a, m) in pairs {
+            let inv = general_mod_inv(a, m).unwrap();
+            assert!(inv < m, "inverse should be canonical residue");
+            assert_eq!(mod_mul(a % m, inv, m), 1);
+        }
+    }
+
+    #[test]
+    fn test_general_mod_inv_non_coprime_or_invalid_modulus() {
+        assert_eq!(general_mod_inv(6, 15), None);
+        assert_eq!(general_mod_inv(0, 17), None);
+        assert_eq!(general_mod_inv(5, 1), None);
+        assert_eq!(general_mod_inv(5, 0), None);
+    }
+
+    #[test]
+    fn test_general_mod_inv_matches_fermat_for_prime_modulus() {
+        let p = 998_244_353u64;
+        for a in [1u64, 2, 3, 5, 17, 123456789, p - 1] {
+            assert_eq!(general_mod_inv(a, p), Some(mod_inv(a, p)));
+        }
     }
 
     #[test]
