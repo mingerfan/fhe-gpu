@@ -7,8 +7,6 @@
 //! - `barrett_reduce` — Barrett reduction for repeated reduction with fixed modulus
 //! - `MontgomeryInt` — Montgomery form integers for efficient modular multiplication
 
-use std::backtrace;
-
 use crate::MathError;
 
 // ────────────────────────────────────────────────────────────
@@ -178,7 +176,7 @@ impl BarrettReducer {
     /// `x` must satisfy `x < modulus^2` for the approximation to be correct.
     ///
     /// # Learning Resources
-    /// - [EN] Barrett reduction implementation notes: N/A §2
+    /// - [EN] Barrett reduction implementation notes: N/A
     /// - [CN] Barrett 约简实现要点: N/A
     pub fn reduce(&self, x: u128) -> u64 {
         let q = (x * self.magic) >> (self.shift * 2);
@@ -194,6 +192,24 @@ impl BarrettReducer {
     pub fn mul_reduce(&self, a: u64, b: u64) -> u64 {
         let product = a as u128 * b as u128;
         self.reduce(product)
+    }
+}
+
+pub fn newton_lifting(a: u64, log2_m: u64) -> u64 {
+    assert!((1..=64).contains(&log2_m));
+    assert!(a & 1 == 1);
+    let mut x = 1u64; // x0
+    let mut bits = 1u64;
+
+    while bits < log2_m {
+        x = x.wrapping_mul(2u64.wrapping_sub(a.wrapping_mul(x))); // 相当于模2^64
+        bits <<= 1;
+    }
+
+    if log2_m == 64 {
+        x
+    } else {
+        x & ((1u64 << log2_m) - 1)
     }
 }
 
@@ -257,9 +273,16 @@ impl MontgomeryParams {
     ///
     pub fn new(modulus: u64) -> Self {
         assert!(modulus & 1 == 1, "Montgomery modulus must be odd");
-        let r2 = ((u64::MAX as u128) + 1) % modulus as u128;
-        // 实现扩展欧几里得算法
-        todo!("compute r2 = R^2 mod m and m_prime = -m^{{-1}} mod 2^64 using iterative method")
+        // R = 2^64
+        let r_mod = mod_pow(2, 64, modulus);
+        // 重复平方算法
+        let r2 = mod_mul(r_mod, r_mod, modulus);
+        let m_prime = newton_lifting(modulus, 64).wrapping_neg(); // 这个只有在模2^64下才可以用wrapping_neg这个计算
+        Self {
+            modulus,
+            r2,
+            m_prime
+        }
     }
 
     /// Montgomery reduction REDC: given `T < m * R`, return `T * R^{-1} mod m`.
@@ -268,22 +291,34 @@ impl MontgomeryParams {
     /// - [EN] REDC algorithm: https://en.wikipedia.org/wiki/Montgomery_modular_multiplication#The_REDC_algorithm
     /// - [CN] REDC 算法步骤解析: N/A
     pub fn redc(&self, t: u128) -> u64 {
-        todo!("REDC: u = (T mod R) * m_prime mod R; t = (T + u*m) >> 64; conditional subtract")
+        assert!((self.modulus as u128 * (1u128 << 64)) > t);
+        let tmp = (t as u64).wrapping_mul(self.m_prime);
+        let tm = (tmp as u128) * (self.modulus as u128);
+        let (_, carry) = (t as u64).overflowing_add(tm as u64);
+        let u = (t >> 64) + (tm >> 64) + (carry as u128);
+        if u >= self.modulus as u128 {
+            (u - self.modulus as u128) as u64
+        } else {
+            u as u64
+        }
     }
 
     /// Convert `a` (in normal form) to Montgomery form `a * R mod m`.
     pub fn to_montgomery(&self, a: u64) -> MontgomeryInt {
-        todo!("return REDC(a * r2)")
+        MontgomeryInt { val: self.redc((a as u128) * (self.r2 as u128)) }
+        // todo!("return REDC(a * r2)")
     }
 
     /// Convert `a` from Montgomery form back to normal form.
     pub fn from_montgomery(&self, a: MontgomeryInt) -> u64 {
-        todo!("return REDC(a.val as u128), which computes a.val * R^{{-1}} mod m")
+        self.redc(a.val as u128)
+        // todo!("return REDC(a.val as u128), which computes a.val * R^{{-1}} mod m")
     }
 
     /// Multiply two Montgomery-form integers: `REDC(a.val * b.val)`.
     pub fn mont_mul(&self, a: MontgomeryInt, b: MontgomeryInt) -> MontgomeryInt {
-        todo!("MontgomeryInt {{ val: self.redc(a.val as u128 * b.val as u128) }}")
+        MontgomeryInt { val: self.redc(a.val as u128 * b.val as u128) }
+        // todo!("MontgomeryInt {{ val: self.redc(a.val as u128 * b.val as u128) }}")
     }
 }
 
@@ -419,13 +454,117 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "implement MontgomeryParams::new first"]
+    fn test_newton_lifting_matches_general_inverse_for_small_powers_of_two() {
+        for log2_m in 1u64..=16 {
+            let modulus = 1u64 << log2_m;
+            for a in (1u64..modulus).step_by(2) {
+                let lifted = newton_lifting(a, log2_m);
+                let expected = general_mod_inv(a, modulus).unwrap();
+                assert_eq!(lifted, expected, "a = {a}, log2_m = {log2_m}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_newton_lifting_returns_inverse_mod_2_pow_64() {
+        for a in [1u64, 3, 5, 17, 0xffff_ffff_ffff_fffb, u64::MAX] {
+            let lifted = newton_lifting(a, 64);
+            assert_eq!(a.wrapping_mul(lifted), 1, "a = {a}");
+        }
+    }
+
+    #[test]
+    fn test_newton_lifting_masks_to_requested_precision() {
+        for (a, log2_m) in [(3u64, 3u64), (5, 5), (17, 7), (123, 9), (255, 11)] {
+            let lifted = newton_lifting(a, log2_m);
+            let modulus = 1u64 << log2_m;
+            assert!(lifted < modulus, "a = {a}, log2_m = {log2_m}");
+            assert_eq!((a * lifted) % modulus, 1, "a = {a}, log2_m = {log2_m}");
+        }
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_newton_lifting_rejects_even_inputs() {
+        let _ = newton_lifting(2, 3);   
+    }
+       
+   
+   
+    #[test]
     fn test_montgomery_roundtrip() {
         let p = 998_244_353u64;
         let params = MontgomeryParams::new(p);
-        let a = 123456789u64;
-        let mont_a = params.to_montgomery(a);
-        assert_eq!(params.from_montgomery(mont_a), a);
+        for a in [0u64, 1, 2, 3, 5, 17, 123_456_789, p - 1] {
+            let mont_a = params.to_montgomery(a);
+            assert_eq!(params.from_montgomery(mont_a), a, "a = {a}");
+        }
+    }
+
+    #[test]
+    fn test_montgomery_mul_matches_mod_mul() {
+        let p = 998_244_353u64;
+        let params = MontgomeryParams::new(p);
+        let cases = [
+            (0u64, 0u64),
+            (0, 1),
+            (1, 1),
+            (2, 3),
+            (5, 17),
+            (123_456_789, 987_654_321 % p),
+            (p - 1, p - 1),
+            (p - 2, p - 3),
+        ];
+
+        for (a, b) in cases {
+            let mont_a = params.to_montgomery(a);
+            let mont_b = params.to_montgomery(b);
+            let product = params.mont_mul(mont_a, mont_b);
+            assert_eq!(
+                params.from_montgomery(product),
+                mod_mul(a, b, p),
+                "a = {a}, b = {b}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_montgomery_with_large_64bit_modulus() {
+        let m = u64::MAX - 58;
+        let params = MontgomeryParams::new(m);
+        let values = [
+            0u64,
+            1,
+            2,
+            3,
+            1 << 32,
+            1_234_567_890_123_456_789,
+            m / 2,
+            m - 2,
+            m - 1,
+        ];
+
+        for a in values {
+            let mont_a = params.to_montgomery(a);
+            assert_eq!(params.from_montgomery(mont_a), a, "roundtrip a = {a}");
+        }
+
+        for (a, b) in [
+            (1u64, m - 1),
+            (2, m - 2),
+            (1 << 32, 1 << 33),
+            (1_234_567_890_123_456_789, m - 2),
+            (m - 2, m - 1),
+        ] {
+            let mont_a = params.to_montgomery(a);
+            let mont_b = params.to_montgomery(b);
+            let product = params.mont_mul(mont_a, mont_b);
+            assert_eq!(
+                params.from_montgomery(product),
+                mod_mul(a, b, m),
+                "a = {a}, b = {b}"
+            );
+        }
     }
 
     #[test]
