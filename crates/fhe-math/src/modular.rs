@@ -17,11 +17,11 @@ use crate::MathError;
 #[inline]
 pub fn mod_add(a: u64, b: u64, m: u64) -> u64 {
     debug_assert!(a < m && b < m, "inputs must be reduced mod m");
-    let s = a + b;
-    if s >= m {
-        s - m
+    let (sum, carry) = a.overflowing_add(b);
+    if carry || sum >= m {
+        sum.wrapping_sub(m)
     } else {
-        s
+        sum
     }
 }
 
@@ -32,7 +32,7 @@ pub fn mod_sub(a: u64, b: u64, m: u64) -> u64 {
     if a >= b {
         a - b
     } else {
-        a + m - b
+        m - (b - a)
     }
 }
 
@@ -57,6 +57,11 @@ pub fn mod_mul(a: u64, b: u64, m: u64) -> u64 {
 /// - [EN] Binary exponentiation (CP-Algorithms): https://cp-algorithms.com/algebra/binary-exp.html
 /// - [CN] 快速幂（OI-Wiki）: https://oi-wiki.org/math/quick-pow/
 pub fn mod_pow(mut base: u64, mut exp: u64, m: u64) -> u64 {
+    assert_ne!(m, 0, "modulus must be non-zero");
+    if m == 1 {
+        return 0;
+    }
+
     let mut result = 1u64;
     base %= m;
     while exp > 0 {
@@ -84,6 +89,12 @@ pub fn mod_pow(mut base: u64, mut exp: u64, m: u64) -> u64 {
 /// - [EN] Modular inverse (CP-Algorithms): https://cp-algorithms.com/algebra/module-inverse.html
 /// - [CN] 乘法逆元（OI-Wiki）: https://oi-wiki.org/math/inverse/
 pub fn mod_inv(a: u64, m: u64) -> u64 {
+    mod_inv_unchecked(a, m)
+}
+
+/// Compute the modular inverse of `a` modulo prime `m` without checking
+/// whether `m` is actually prime.
+pub fn mod_inv_unchecked(a: u64, m: u64) -> u64 {
     assert_ne!(a, 0, "0 has no modular inverse");
     mod_pow(a, m - 2, m)
 }
@@ -254,9 +265,9 @@ pub struct MontgomeryInt {
     pub val: u64,
 }
 
-/// Precomputed parameters for a fixed Montgomery modulus.
+/// Precomputed Montgomery arithmetic context for a fixed modulus.
 #[derive(Clone, Debug)]
-pub struct MontgomeryParams {
+pub struct MontgomeryContext {
     /// The modulus `m` (must be odd).
     pub modulus: u64,
     /// `R^2 mod m`, used to convert into Montgomery form.
@@ -265,13 +276,21 @@ pub struct MontgomeryParams {
     pub m_prime: u64,
 }
 
-impl MontgomeryParams {
+/// Prime-only Montgomery operations.
+///
+/// This adapter is zero-cost: it performs no primality validation. Its purpose
+/// is to make the prime-modulus assumption explicit at the call site.
+pub struct PrimeMontgomeryOps<'a> {
+    ctx: &'a MontgomeryContext,
+}
+
+impl MontgomeryContext {
     /// Compute Montgomery parameters for `modulus`.
     ///
     /// # Panics
     /// Panics if `modulus` is even (Montgomery requires odd modulus).
     ///
-    pub fn new(modulus: u64) -> Self {
+    pub fn new(modulus: u64) -> MontgomeryContext {
         assert!(modulus & 1 == 1, "Montgomery modulus must be odd");
         // R = 2^64
         let r_mod = mod_pow(2, 64, modulus);
@@ -315,11 +334,57 @@ impl MontgomeryParams {
         self.redc(a.val as u128)
     }
 
+    /// Add two Montgomery-form integers.
+    ///
+    /// Because Montgomery form is just a scaled residue class, addition stays
+    /// in the Montgomery domain: `(aR + bR) mod m = (a + b)R mod m`.
+    pub fn mont_add(&self, a: MontgomeryInt, b: MontgomeryInt) -> MontgomeryInt {
+        MontgomeryInt {
+            val: mod_add(a.val, b.val, self.modulus),
+        }
+    }
+
+    /// Subtract two Montgomery-form integers.
+    ///
+    /// Like addition, subtraction preserves the Montgomery representation.
+    pub fn mont_sub(&self, a: MontgomeryInt, b: MontgomeryInt) -> MontgomeryInt {
+        MontgomeryInt {
+            val: mod_sub(a.val, b.val, self.modulus),
+        }
+    }
+
     /// Multiply two Montgomery-form integers: `REDC(a.val * b.val)`.
     pub fn mont_mul(&self, a: MontgomeryInt, b: MontgomeryInt) -> MontgomeryInt {
         MontgomeryInt {
             val: self.redc(a.val as u128 * b.val as u128),
         }
+    }
+
+    /// Compute `base^exp` while staying in Montgomery form.
+    pub fn mont_pow(&self, mut base: MontgomeryInt, mut exp: u64) -> MontgomeryInt {
+        let mut result = self.to_montgomery(1);
+        while exp > 0 {
+            if exp & 1 == 1 {
+                result = self.mont_mul(result, base);
+            }
+            base = self.mont_mul(base, base);
+            exp >>= 1;
+        }
+        result
+    }
+
+    /// Mark this context as being used under the "modulus is prime" assumption.
+    ///
+    /// This is a documentation and API-clarity tool, not a runtime validator.
+    pub fn assuming_prime(&self) -> PrimeMontgomeryOps<'_> {
+        PrimeMontgomeryOps { ctx: self }
+    }
+}
+
+impl PrimeMontgomeryOps<'_> {
+    /// Fast inverse in Montgomery form under the assumption that the modulus is prime.
+    pub fn mont_inv_fast(&self, a: MontgomeryInt) -> MontgomeryInt {
+        self.ctx.mont_pow(a, self.ctx.modulus - 2)
     }
 }
 
@@ -393,6 +458,27 @@ mod tests {
     }
 
     #[test]
+    fn test_mod_add_large_modulus() {
+        let m = u64::MAX - 58;
+        assert_eq!(mod_add(m - 1, m - 1, m), m - 2);
+        assert_eq!(mod_add(m - 2, 1, m), m - 1);
+    }
+
+    #[test]
+    fn test_mod_sub() {
+        assert_eq!(mod_sub(3, 4, 7), 6);
+        assert_eq!(mod_sub(5, 6, 11), 10);
+        assert_eq!(mod_sub(6, 6, 11), 0);
+    }
+
+    #[test]
+    fn test_mod_sub_large_modulus() {
+        let m = u64::MAX - 58;
+        assert_eq!(mod_sub(0, 1, m), m - 1);
+        assert_eq!(mod_sub(1, m - 1, m), 2);
+    }
+
+    #[test]
     fn test_mod_mul() {
         assert_eq!(mod_mul(3, 4, 7), 5);
         assert_eq!(mod_mul(100, 200, 97), mod_pow(100, 1, 97) * 200 % 97);
@@ -403,6 +489,14 @@ mod tests {
         assert_eq!(mod_pow(2, 10, 1000), 24);
         assert_eq!(mod_pow(3, 0, 7), 1);
         assert_eq!(mod_pow(0, 5, 7), 0);
+        assert_eq!(mod_pow(123, 9, 1), 0);
+    }
+
+    #[test]
+    fn test_mod_pow_large_modulus() {
+        let m = u64::MAX - 58;
+        assert_eq!(mod_pow(m - 1, 2, m), 1);
+        assert_eq!(mod_pow(m - 1, 3, m), m - 1);
     }
 
     #[test]
@@ -493,7 +587,7 @@ mod tests {
     #[test]
     fn test_montgomery_roundtrip() {
         let p = 998_244_353u64;
-        let params = MontgomeryParams::new(p);
+        let params = MontgomeryContext::new(p);
         for a in [0u64, 1, 2, 3, 5, 17, 123_456_789, p - 1] {
             let mont_a = params.to_montgomery(a);
             assert_eq!(params.from_montgomery(mont_a), a, "a = {a}");
@@ -503,7 +597,7 @@ mod tests {
     #[test]
     fn test_montgomery_mul_matches_mod_mul() {
         let p = 998_244_353u64;
-        let params = MontgomeryParams::new(p);
+        let params = MontgomeryContext::new(p);
         let cases = [
             (0u64, 0u64),
             (0, 1),
@@ -528,9 +622,107 @@ mod tests {
     }
 
     #[test]
+    fn test_montgomery_add_matches_mod_add() {
+        let p = 998_244_353u64;
+        let params = MontgomeryContext::new(p);
+        let cases = [
+            (0u64, 0u64),
+            (0, 1),
+            (1, 1),
+            (2, 3),
+            (5, 17),
+            (123_456_789, 987_654_321 % p),
+            (p - 1, p - 1),
+            (p - 2, p - 3),
+        ];
+
+        for (a, b) in cases {
+            let mont_a = params.to_montgomery(a);
+            let mont_b = params.to_montgomery(b);
+            let sum = params.mont_add(mont_a, mont_b);
+            assert_eq!(
+                params.from_montgomery(sum),
+                mod_add(a % p, b % p, p),
+                "a = {a}, b = {b}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_montgomery_sub_matches_mod_sub() {
+        let p = 998_244_353u64;
+        let params = MontgomeryContext::new(p);
+        let cases = [
+            (0u64, 0u64),
+            (0, 1),
+            (1, 1),
+            (2, 3),
+            (5, 17),
+            (123_456_789, 987_654_321 % p),
+            (p - 1, p - 1),
+            (p - 2, p - 3),
+        ];
+
+        for (a, b) in cases {
+            let mont_a = params.to_montgomery(a);
+            let mont_b = params.to_montgomery(b);
+            let diff = params.mont_sub(mont_a, mont_b);
+            assert_eq!(
+                params.from_montgomery(diff),
+                mod_sub(a % p, b % p, p),
+                "a = {a}, b = {b}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_montgomery_pow_matches_mod_pow() {
+        let p = 998_244_353u64;
+        let params = MontgomeryContext::new(p);
+
+        for (base, exp) in [
+            (0u64, 0u64),
+            (0, 5),
+            (1, 17),
+            (2, 10),
+            (5, 23),
+            (123_456_789, 0),
+            (123_456_789, 123),
+            (p - 1, 2),
+            (p - 1, 3),
+        ] {
+            let mont_base = params.to_montgomery(base % p);
+            let pow = params.mont_pow(mont_base, exp);
+            assert_eq!(
+                params.from_montgomery(pow),
+                mod_pow(base % p, exp, p),
+                "base = {base}, exp = {exp}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_montgomery_fast_inv_matches_mod_inv() {
+        let p = 998_244_353u64;
+        let params = MontgomeryContext::new(p);
+        let prime_ops = params.assuming_prime();
+
+        for a in [1u64, 2, 3, 5, 17, 123_456_789, p - 1] {
+            let mont_a = params.to_montgomery(a);
+            let mont_inv = prime_ops.mont_inv_fast(mont_a);
+            assert_eq!(params.from_montgomery(mont_inv), mod_inv(a, p), "a = {a}");
+            assert_eq!(
+                params.from_montgomery(params.mont_mul(mont_a, mont_inv)),
+                1,
+                "a = {a}"
+            );
+        }
+    }
+
+    #[test]
     fn test_montgomery_with_large_64bit_modulus() {
         let m = u64::MAX - 58;
-        let params = MontgomeryParams::new(m);
+        let params = MontgomeryContext::new(m);
         let values = [
             0u64,
             1,
@@ -564,6 +756,21 @@ mod tests {
                 "a = {a}, b = {b}"
             );
         }
+
+        let mont_sum = params.mont_add(
+            params.to_montgomery(m - 1),
+            params.to_montgomery(m - 1),
+        );
+        assert_eq!(params.from_montgomery(mont_sum), m - 2);
+
+        let mont_diff = params.mont_sub(
+            params.to_montgomery(0),
+            params.to_montgomery(1),
+        );
+        assert_eq!(params.from_montgomery(mont_diff), m - 1);
+
+        let mont_pow = params.mont_pow(params.to_montgomery(m - 1), 3);
+        assert_eq!(params.from_montgomery(mont_pow), m - 1);
     }
 
     #[test]
