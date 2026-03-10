@@ -281,7 +281,7 @@ impl MontgomeryParams {
         Self {
             modulus,
             r2,
-            m_prime
+            m_prime,
         }
     }
 
@@ -305,20 +305,21 @@ impl MontgomeryParams {
 
     /// Convert `a` (in normal form) to Montgomery form `a * R mod m`.
     pub fn to_montgomery(&self, a: u64) -> MontgomeryInt {
-        MontgomeryInt { val: self.redc((a as u128) * (self.r2 as u128)) }
-        // todo!("return REDC(a * r2)")
+        MontgomeryInt {
+            val: self.redc((a as u128) * (self.r2 as u128)),
+        }
     }
 
     /// Convert `a` from Montgomery form back to normal form.
     pub fn from_montgomery(&self, a: MontgomeryInt) -> u64 {
         self.redc(a.val as u128)
-        // todo!("return REDC(a.val as u128), which computes a.val * R^{{-1}} mod m")
     }
 
     /// Multiply two Montgomery-form integers: `REDC(a.val * b.val)`.
     pub fn mont_mul(&self, a: MontgomeryInt, b: MontgomeryInt) -> MontgomeryInt {
-        MontgomeryInt { val: self.redc(a.val as u128 * b.val as u128) }
-        // todo!("MontgomeryInt {{ val: self.redc(a.val as u128 * b.val as u128) }}")
+        MontgomeryInt {
+            val: self.redc(a.val as u128 * b.val as u128),
+        }
     }
 }
 
@@ -486,11 +487,9 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_newton_lifting_rejects_even_inputs() {
-        let _ = newton_lifting(2, 3);   
+        let _ = newton_lifting(2, 3);
     }
-       
-   
-   
+
     #[test]
     fn test_montgomery_roundtrip() {
         let p = 998_244_353u64;
