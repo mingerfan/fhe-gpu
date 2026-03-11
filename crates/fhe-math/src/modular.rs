@@ -414,10 +414,10 @@ pub fn find_primitive_root(p: u64) -> Result<u64, MathError> {
     }
     // Trial: find smallest g that is a primitive root
     // For NTT-friendly primes, g is typically small (3, 5, or 7)
+    let pm1 = p - 1;
+    let factors = prime_factors(pm1);
     'outer: for g in 2..p {
         // Check g^((p-1)/q) != 1 for all prime factors q of p-1
-        let pm1 = p - 1;
-        let factors = prime_factors(pm1);
         for q in &factors {
             if mod_pow(g, pm1 / q, p) == 1 {
                 continue 'outer;
@@ -757,16 +757,10 @@ mod tests {
             );
         }
 
-        let mont_sum = params.mont_add(
-            params.to_montgomery(m - 1),
-            params.to_montgomery(m - 1),
-        );
+        let mont_sum = params.mont_add(params.to_montgomery(m - 1), params.to_montgomery(m - 1));
         assert_eq!(params.from_montgomery(mont_sum), m - 2);
 
-        let mont_diff = params.mont_sub(
-            params.to_montgomery(0),
-            params.to_montgomery(1),
-        );
+        let mont_diff = params.mont_sub(params.to_montgomery(0), params.to_montgomery(1));
         assert_eq!(params.from_montgomery(mont_diff), m - 1);
 
         let mont_pow = params.mont_pow(params.to_montgomery(m - 1), 3);
