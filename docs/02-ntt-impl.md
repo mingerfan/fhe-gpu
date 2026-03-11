@@ -173,95 +173,362 @@ $$
 经过变换后，我们可以将第一层的运算结果存储在一个数组中，然后逐渐两两合并，最终得到计算结果，达到节约空间复杂度的目的（递归方法空间比这个方法多得多）
 
 # NTT 基本原理
-在数学中，NTT 是关于任意 [环](https://oi-wiki.org/math/algebra/basic/#%E7%8E%AF) 上的离散傅立叶变换（DFT）。在有限域的情况下，通常称为数论变换（NTT）。
+在数学中，NTT 是关于任意 [环](https://oi-wiki.org/math/algebra/basic/#%E7%8E%AF) 上的离散傅立叶变换（DFT）。在有限域的情况下，通常称为数论变换（NTT）。
 
-**数论变换**（number-theoretic transform, NTT）是离散傅里叶变换（DFT）在数论基础上的实现；**快速数论变换**（fast number-theoretic transform, FNTT）是 [快速傅里叶变换](https://oi-wiki.org/math/poly/fft/)（FFT）在数论基础上的实现。
+**数论变换**（number-theoretic transform, NTT）是离散傅里叶变换（DFT）在数论基础上的实现；**快速数论变换**（fast number-theoretic transform, FNTT）是 [快速傅里叶变换](https://oi-wiki.org/math/poly/fft/)（FFT）在数论基础上的实现。
 
-在FFT中，有两个单位根的两个性质是非常重要的，它们分别是：
+在 FFT 中，有两个单位根的性质是非常重要的：
 - 周期性：$\omega_{N}^{N}=1$
 - 消去律：$\omega_{N}^{N/2}=-1$
 
-而在$\mathbb{Z}_{p}$的世界中，我们需要的原根则是
+而在 $\mathbb{Z}_{p}$ 的世界中，我们需要的原根则是
 $$
 \begin{align}
-&g_{N}=g^{q} (mod~p), \\
+&g_{N}=g^{q} \pmod p, \\
 &p=qN+1, \\
 &N=2^{m}
 \end{align}
 $$
-注意，$p$是一个质数，$N$在这里仍然表示多项式系数的数量，也间接着表示多项式的最高次数
 
-由于$p-1=qN$，根据费马小定理，对于质数$p$，我们有$g^{p-1}\equiv 1(mod~p)$，因此，我们有
+注意，$p$ 是一个质数，$N$ 在这里仍然表示多项式系数的数量，也间接着表示多项式的最高次数。
+
+由于 $p-1=qN$，根据费马小定理，对于质数 $p$，我们有 $g^{p-1}\equiv 1 \pmod p$，因此
 $$
-g^{qN}\equiv 1(mod~p)
+g^{qN}\equiv 1 \pmod p
 $$
+
 也就是
 $$
 \begin{align}
-g_{N}^{N}\equiv 1(mod~p)
+g_{N}^{N}\equiv 1 \pmod p
 \end{align}
 $$
 
+而由于 $(g_{N}^{N/2})^{2}=g_{N}^{N}\equiv 1 \pmod p$，在模数的世界中，平方为 $1$ 的数只有 $1$ 或者 $-1$（即 $p-1$），而由于原根的限制是 $N$ 为满足 $g_{N}^{N}\equiv 1 \pmod p$ 的最小数，因此 $g_{N}^{N/2}$ 只能等于 $-1$。
 
-而由于$(g_{N}^{N/2})^{2}=g_{N}^{N}\equiv 1(mod~p)$，在模数的世界中，平方为1的数只有1或者-1（$p-1$），而由于原根的限制是$N$为满足$g_{N}^{N}\equiv 1(mod~p)$的最小数，因此$g_{N}^{N/2}$只能等于-1
-
-所以，$g_{n}$具有如下的特性
+所以，$g_{N}$ 具有如下的特性
 $$
 \begin{align}
-g_{N}^{N}\equiv 1(mod~p) \\
-g_{N}^{N/2}\equiv -1(mod~p)
+g_{N}^{N}\equiv 1 \pmod p \\
+g_{N}^{N/2}\equiv -1 \pmod p
 \end{align}
 $$
 
-这些特性决定了我们能够使用类似FFT的方法加速运算
+这些特性决定了我们能够使用类似 FFT 的方法加速运算。
 
-对于质数$p$，我们能找到足够的满足要求$p$进行计算，常见的$p$如下：
+对于质数 $p$，我们能找到足够的满足要求的 $p$ 进行计算，常见的 $p$ 如下：
 ![[Pasted image 20251120175440.png]]
 
-有些时候，N是非常大的，然而我们不需要那么多的多项式参数，因此我们可以令单位根为$g_{n}=g^{\frac{qN}{n}}$，然后我们有
+有些时候，$N$ 是非常大的，然而我们不需要那么多的多项式参数，因此我们可以令单位根为
+$$
+g_{n}=g^{\frac{qN}{n}}
+$$
 
+然后我们有
 $$
 \begin{align}
-g_{n}^{n}=g^{(qN/n)\cdot n}\equiv 1(mod~p) \\
-g_{n}^{n/2}=g^{(qN/n)\cdot (n/2)}=g^{qN/2}\equiv -1(mod~p)
+g_{n}^{n}=g^{(qN/n)\cdot n}\equiv 1 \pmod p \\
+g_{n}^{n/2}=g^{(qN/n)\cdot (n/2)}=g^{qN/2}\equiv -1 \pmod p
 \end{align}
 $$
 
-使用变换后的单位根，相当于缩减了N的大小
+使用变换后的单位根，相当于缩减了 $N$ 的大小。
 
-## NTT的乘法
-NTT在计算乘法的时候需要补零，原因在于多项式乘法时，多项式系数会加倍，因此导致原先的n个点无法还原2n长度的结果
-![Pasted image 20251120214406.png](attachments/Pasted%20image%2020251120214406.png)
+如果换一种更常见的写法，因为有限域 $\mathbb{Z}_{p}^{*}$ 的乘法群阶为 $p-1$，所以只要
+$$
+n \mid (p-1)
+$$
 
-从卷积的角度来看，不补0会发生卷积混叠，也叫循环卷积
-![Pasted image 20251120214454.png](attachments/Pasted%20image%2020251120214454.png)
+就可以从一个 primitive root $g$ 构造出
+$$
+\omega = g^{(p-1)/n}
+$$
 
+如果把 $p-1$ 写成
+$$
+p-1 = kN
+$$
 
-## CKKS中的特殊NTT(Negacyclic NTT)
-这个NTT不需要补零
-![Pasted image 20251120214735.png](attachments/Pasted%20image%2020251120214735.png)
+并且想从一个更大的 $2$ 的幂次子群里取出长度为 $n$ 的子变换，那么就可以写成
+$$
+g_n = g^{kN/n}
+$$
+
+这和前面写的
+$$
+g_n = g^{qN/n}
+$$
+
+本质上是同一个意思，只是这里把前面式子中的陪因子单独记成了 $k$，避免和代码里把 $q$ 当作模数的写法混淆。也就是说，这里只是**记号微调**，不是在推翻你前面的推导。
+
+对于质数 $p$，常见的 NTT-friendly prime 一般都满足
+$$
+p \equiv 1 \pmod n
+$$
+
+而在 RLWE 场景里更常见的是
+$$
+p \equiv 1 \pmod {2n}
+$$
+
+## 标准 NTT 的卷积语义
+
+标准 NTT 对应的是循环卷积，也就是多项式环
+$$
+Z_p[x] / (x^n - 1)
+$$
+
+在这个环里，$x^n \equiv 1$，所以高次项会“无符号地折回去”。如果你只是想在普通多项式环里做乘法，那么两个次数小于 $n$ 的多项式相乘后最高次数可以到 $2n - 2$，这时如果仍然只用长度 $n$ 的 NTT，就会发生卷积混叠。
+
+这也是教材里总说“NTT 乘法要补零”的原因：
+
+1. 把两个多项式补零到足够长度
+2. 做标准 NTT
+3. 频域逐点乘
+4. 做 INTT
+
+相关示意图仍然可以参考：
+
+- `attachments/Pasted image 20251120214406.png`
+- `attachments/Pasted image 20251120214454.png`
+
+## CKKS 中的特殊 NTT：Negacyclic NTT
+
+CKKS / RLWE 真正工作的环不是
+$$
+Z_p[x] / (x^n - 1)
+$$
+
+而是
+$$
+Z_p[x] / (x^n + 1)
+$$
+
+也就是
+$$
+x^n \equiv -1
+$$
+
+所以高次项回卷时会带一个负号，这种卷积叫 negacyclic convolution。
+
+这时最自然的做法不是直接只谈 $n$ 阶根，而是先找一个 primitive $2n$ 阶单位根 $\psi$：
+$$
+\psi^{2n} \equiv 1 \pmod p,\qquad \psi^n \equiv -1 \pmod p
+$$
+
+它要求
+$$
+p \equiv 1 \pmod {2n}
+$$
+
+再定义
+$$
+\omega = \psi^2
+$$
+
+则 $\omega$ 就是一个 primitive $n$ 阶单位根。这里可以这样理解：
+
+- $\psi$ 负责把 $x^n = -1$ 这个负号结构编码进去
+- $\omega$ 负责标准长度 $n$ 的蝶形递归
+
+所以文档里同时出现 $n$ 和 $2n$ 并不矛盾，它们谈的是两个不同但相关的根。
+
+> [!note]
+> $g_n = g^{kN/n}$ 这种写法是在谈“怎么从更大的子群里抽出一个 $n$ 阶根”。
+> $\psi = g^{(p-1)/(2n)}$ 这种写法是在谈“负循环 NTT 里先找一个 $2n$ 阶根”。
+> 两者都对，只是语境不同。
 
 # NTT 实现细节
 
 ## Cooley-Tukey 蝴蝶操作
 
-TODO
+无论是 FFT、标准 NTT，还是 negacyclic NTT，最核心的计算单元都是蝶形。对于一对输入 $u, v$ 和一个 twiddle $w$，前向蝶形可以写成
+
+$$
+\begin{aligned}
+t &= v \cdot w \pmod p \\
+y_0 &= u + t \pmod p \\
+y_1 &= u - t \pmod p
+\end{aligned}
+$$
+
+实现里通常对应：
+
+```text
+t  = mul_mod(v, w, p)
+a' = add_mod(u, t, p)
+b' = sub_mod(u, t, p)
+```
+
+逆变换时使用逆 twiddle $w^{-1}$，并在最后整体乘上 $n^{-1}$。不少实现会把这个归一化因子融合到最后一层或者 inverse 的最后一步里。
+
+如果用迭代版 Cooley-Tukey，最常见的外层结构大致是：
+
+```text
+len = 1
+while len < n:
+    step = n / (2 * len)
+    for block in 0..n step 2*len:
+        for j in 0..len:
+            w = twiddle[j * step]
+            u = a[block + j]
+            v = a[block + j + len]
+            t = v * w mod p
+            a[block + j]       = u + t mod p
+            a[block + j + len] = u - t mod p
+    len *= 2
+```
 
 ## 旋转因子预计算
 
-TODO
+twiddle factor 就是蝶形里反复使用的单位根幂次。预计算的目的很直接：把热路径里的 `mod_pow` 全都挪到 plan 初始化阶段。
+
+最基础的预计算包括：
+
+1. $\omega^0, \omega^1, \ldots, \omega^{n-1}$
+2. inverse 用到的 $\omega^{-0}, \omega^{-1}, \ldots, \omega^{-(n-1)}$
+3. 如果走的是 negacyclic 的 “twist + 标准 NTT” 路线，还要预计算 $\psi^j$ 与 $\psi^{-j}$
+
+twiddle 的存储顺序也会影响接口语义。有的实现把输入先做 bit-reversal，输出保持自然顺序；有的实现保持输入自然顺序，但让频域结果落在 bit-reversed 顺序。
+
+本项目当前依赖的 `concrete-ntt` 属于后一类：
+
+- 系数域输入是标准顺序
+- forward 后的频域结果是 bit-reversed 顺序
+- inverse 期望输入也是 bit-reversed 顺序
+- inverse 输出再回到标准顺序
+
+这不会影响频域逐点乘的正确性，因为两个操作数使用的是同一种置换布局；同一个频点仍然和同一个频点相乘，只是数组下标不再是直观的自然顺序。
 
 ## 负循环 NTT（Negacyclic NTT）
 
-TODO: 解释扭转因子（twist factor）的作用
+### Twist factor 到底在做什么
+
+如果我们定义扭转后的系数
+
+$$
+a'_j = a_j \psi^j
+$$
+
+并记
+$$
+\omega = \psi^2
+$$
+
+那么对 $a'$ 做一次标准 NTT 得到
+
+$$
+\hat{a}_k
+= \sum_{j=0}^{n-1} a'_j \omega^{jk}
+= \sum_{j=0}^{n-1} a_j \psi^j (\psi^2)^{jk}
+= \sum_{j=0}^{n-1} a_j \psi^{j(2k+1)}
+$$
+
+也就是说，我们实际上是在奇数次幂点
+
+$$
+\psi,\ \psi^3,\ \psi^5,\ \ldots,\ \psi^{2n-1}
+$$
+
+上评估多项式。这些点天然满足
+$$
+x^n = -1
+$$
+
+所以正好对应
+$$
+Z_p[x] / (x^n + 1)
+$$
+
+这个负循环环。
+
+逆变换时再把这个扭转消掉：
+
+$$
+a_j = \psi^{-j} \cdot n^{-1} \sum_{k=0}^{n-1} \hat{a}_k \omega^{-jk}
+$$
+
+所以 twist factor 的一句话解释就是：
+
+它把
+$$
+x^n + 1
+$$
+
+上的问题变形成一次“标准长度 $n$ 的 NTT”，从而复用普通蝶形结构。
+
+### 为什么 CKKS 的 negacyclic NTT 不需要补零
+
+这里“不需要补零”并不是说乘法结果没变长，而是因为我们本来就不是在普通多项式环里做乘法，而是在商环
+
+$$
+Z_p[x] / (x^n + 1)
+$$
+
+里做乘法。
+
+在这个环中，所有高于 $n-1$ 次的项都会立即根据
+
+$$
+x^n \equiv -1
+$$
+
+折叠回前 $n$ 项，因此结果本来就只需要 $n$ 个系数表示。负循环 NTT 直接对这个商环做对角化，所以不需要像普通卷积那样先补零再避免混叠。
+
+### 本项目里的语义
+
+这部分需要特别说清楚，因为它直接影响代码该不该手动乘 twist factor。
+
+如果我们自己从头写一个“教材式”的 negacyclic NTT，最自然的步骤是：
+
+1. 求
+   $$
+   \psi = g^{(p - 1)/(2n)}
+   $$
+2. 令
+   $$
+   \omega = \psi^2
+   $$
+3. forward 前先乘 $\psi^j$
+4. 跑一次标准长度 $n$ 的 NTT
+5. inverse 后再乘 $\psi^{-j}$
+
+但本项目 `crates/fhe-math/src/ntt.rs` 里封装的后端是 `concrete_ntt::prime64::Plan`。根据它的官方文档，`prime64` 本身就是 “64bit negacyclic NTT for a prime modulus”，不是普通 cyclic NTT plan。
+
+这意味着：
+
+- `NttPlan::new` 的模数约束要理解成“支持负循环 NTT”
+- `NttPlan::forward` / `inverse` 的语义也应理解为“直接做 negacyclic NTT / INTT”
+- 如果继续沿用这个后端，业务代码里就不应该再额外手动乘一遍 twist factor
+
+换句话说：
+
+- “twist + 标准 NTT” 是一种实现路线
+- “直接 negacyclic backend” 是另一种封装路线
+- 二者数学目标相同，但接口层面不能混用
 
 ## 代码对应
 
-- `crates/fhe-math/src/ntt.rs`: `NttPlan::forward`, `NttPlan::inverse`
-- `crates/fhe-math/src/poly.rs`: `Poly::ntt_forward`, `Poly::ntt_inverse`
+- `crates/fhe-math/src/ntt.rs`
+  - `NttPlan::new`
+  - `NttPlan::forward`
+  - `NttPlan::inverse`
+  - `primitive_root_of_unity`
+- `crates/fhe-math/src/poly.rs`
+  - `Poly::mul`
+  - `Poly::ntt_forward`
+  - `Poly::ntt_inverse`
+
+## 参考资料
+
+- `concrete-ntt` docs.rs: <https://docs.rs/concrete-ntt/latest/concrete_ntt/>
+- `concrete-ntt::prime64` docs.rs: <https://docs.rs/concrete-ntt/latest/concrete_ntt/prime64/>
+- Longa, Naehrig, "Speeding up the Number Theoretic Transform for Faster Ideal Lattice-Based Cryptography": <https://eprint.iacr.org/2016/504>
+- Zhou et al., "Preprocess-then-NTT Technique and Its Applications to KYBER and NEWHOPE": <https://eprint.iacr.org/2018/995>
 
 ## TODO
 
 - [ ] 实现 `NttPlan::forward`
 - [ ] 实现 `NttPlan::inverse`
+- [ ] 明确 `Poly::ntt_forward` / `Poly::ntt_inverse` 是走 “直接 negacyclic backend” 还是 “twist + 标准 NTT” 路线
 - [ ] 通过 `test_ntt_roundtrip` 测试

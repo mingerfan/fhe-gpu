@@ -1,14 +1,20 @@
-//! NTT (Number Theoretic Transform) planning and execution.
+//! Negacyclic NTT (Number Theoretic Transform) planning and execution.
 //!
 //! The NTT is the modular-arithmetic analogue of the DFT, used to speed up
 //! polynomial multiplication from O(n²) to O(n log n).
 //!
 //! # Mathematical Background
-//! For a prime `q ≡ 1 (mod 2n)`, the NTT of length `n` over Z_q is:
+//! This module is about the RLWE/CKKS-style transform over `Z_q[x] / (x^n + 1)`,
+//! not the textbook cyclic transform over `Z_q[x] / (x^n - 1)`.
+//!
+//! For a prime `q ≡ 1 (mod 2n)`, choose a primitive `2n`-th root `ψ` with
+//! `ψ^n = -1`, and define `ω = ψ^2`. A textbook twisted negacyclic NTT can
+//! then be written as:
 //! ```text
-//! A[k] = Σ_{j=0}^{n-1} a[j] * ω^{jk} mod q
+//! A[k] = Σ_{j=0}^{n-1} a[j] * ψ^j * ω^{jk} mod q
 //! ```
-//! where `ω` is a primitive `n`-th root of unity in Z_q.
+//! The wrapped backend `concrete_ntt::prime64::Plan` packages these negacyclic
+//! semantics directly.
 //!
 //! # Learning Resources
 //! - [EN] NTT tutorial (CP-Algorithms): https://cp-algorithms.com/algebra/fft.html#number-theoretic-transform
@@ -18,9 +24,10 @@
 
 use crate::MathError;
 
-/// A precomputed NTT plan for a given (modulus, degree) pair.
+/// A precomputed negacyclic NTT plan for a given (modulus, degree) pair.
 ///
-/// Wraps `concrete_ntt::prime64::Plan` which handles the low-level NTT implementation.
+/// Wraps `concrete_ntt::prime64::Plan`, which is a direct negacyclic NTT plan
+/// for `Z_q[x] / (x^n + 1)`.
 /// This type caches the twiddle factors so they are computed only once.
 pub struct NttPlan {
     /// The prime modulus `q` (must satisfy `q ≡ 1 mod 2n`).
@@ -32,14 +39,16 @@ pub struct NttPlan {
 }
 
 impl NttPlan {
-    /// Create a new NTT plan for the given `(modulus, degree)` pair.
+    /// Create a new negacyclic NTT plan for the given `(modulus, degree)` pair.
     ///
     /// # Mathematical Specification
     /// ```text
     /// Preconditions:
     ///   - degree must be a power of 2
     ///   - modulus must be prime and satisfy modulus ≡ 1 (mod 2*degree)
-    ///   - 2^62 < modulus < 2^63  (concrete-ntt requirement)
+    ///   - the backend may impose extra constraints; for the current
+    ///     concrete-ntt backend, the modulus must admit a primitive 2*degree-th
+    ///     root of unity and very small degrees may be rejected
     /// ```
     ///
     /// # Errors
@@ -57,11 +66,19 @@ impl NttPlan {
         Ok(Self { modulus, degree, inner })
     }
 
-    /// Perform an in-place forward NTT on `data`.
+    /// Perform an in-place forward negacyclic NTT on `data`.
     ///
-    /// After this call, `data` contains the NTT coefficients:
+    /// After this call, `data` contains negacyclic NTT coefficients.
+    ///
+    /// With the current backend, the input is in standard coefficient order and
+    /// the output is in the backend's frequency-domain layout (bit-reversed for
+    /// `concrete-ntt`).
+    ///
+    /// Callers should not apply an extra manual twist factor around this call,
+    /// because the backend already implements the negacyclic transform itself.
     /// ```text
-    /// data[k] = Σ_{j=0}^{n-1} data_in[j] * ω^{jk} mod q
+    /// textbook twisted form:
+    /// data[k] = Σ_{j=0}^{n-1} data_in[j] * ψ^j * ω^{jk} mod q
     /// ```
     ///
     /// # Panics
@@ -73,13 +90,16 @@ impl NttPlan {
     /// - [CN] NTT 蝴蝶操作（OI-Wiki）: https://oi-wiki.org/math/poly/ntt/
     pub fn forward(&self, data: &mut [u64]) {
         assert_eq!(data.len(), self.degree, "NTT forward: data length mismatch");
-        todo!("call self.inner.fwd(data) — concrete-ntt prime64::Plan does in-place forward NTT")
+        todo!("call self.inner.fwd(data) — concrete-ntt prime64::Plan does in-place forward negacyclic NTT")
     }
 
-    /// Perform an in-place inverse NTT on `data`, normalizing by `n^{-1} mod q`.
+    /// Perform an in-place inverse negacyclic NTT on `data`.
     ///
     /// After this call, `data` contains the original polynomial coefficients
-    /// (the INTT is the exact inverse of `forward`).
+    /// in standard order.
+    ///
+    /// The input should use the same backend frequency-domain layout produced by
+    /// `forward` (bit-reversed for `concrete-ntt`).
     ///
     /// # Panics
     /// Panics if `data.len() != self.degree`.
@@ -89,12 +109,16 @@ impl NttPlan {
     /// - [CN] INTT 归一化（OI-Wiki）: https://oi-wiki.org/math/poly/ntt/
     pub fn inverse(&self, data: &mut [u64]) {
         assert_eq!(data.len(), self.degree, "NTT inverse: data length mismatch");
-        todo!("call self.inner.inv(data) — concrete-ntt prime64::Plan does in-place inverse NTT (includes n^{{-1}} normalization)")
+        todo!("call self.inner.inv(data) — concrete-ntt prime64::Plan does in-place inverse negacyclic NTT")
     }
 
     /// Elementwise multiply two NTT-domain vectors in-place: `a[i] = a[i] * b[i] mod q`.
     ///
     /// This is the O(n) "convolution in frequency domain" step.
+    ///
+    /// Important: both vectors must be in the same backend frequency layout.
+    /// Under `concrete-ntt`, that means negacyclic frequency coefficients stored
+    /// in bit-reversed order.
     pub fn pointwise_mul(&self, a: &mut [u64], b: &[u64]) {
         assert_eq!(a.len(), b.len());
         assert_eq!(a.len(), self.degree);
@@ -104,14 +128,17 @@ impl NttPlan {
     }
 }
 
-/// Compute the primitive `2n`-th root of unity `ω_{2n}` in `Z_q`.
+/// Compute a primitive `2n`-th root of unity `ψ` in `Z_q`.
 ///
 /// # Mathematical Specification
 /// ```text
 /// g = primitive root of Z_q^*  (generator of the full group of order q-1)
-/// ω_{2n} = g^{(q-1)/(2n)} mod q
+/// ψ = g^{(q-1)/(2n)} mod q
 /// ```
-/// Verify: `ω_{2n}^n = -1 mod q` (primitive, not just a square root of 1).
+/// Verify: `ψ^n = -1 mod q` (primitive, not just a square root of 1).
+///
+/// In negacyclic NTT, this is the natural root to talk about. The corresponding
+/// cyclic `n`-th root is `ω = ψ^2`.
 ///
 /// # Learning Resources
 /// - [EN] Roots of unity in NTT: https://cgyurgyik.github.io/posts/2021/04/brief-introduction-to-ntt/
