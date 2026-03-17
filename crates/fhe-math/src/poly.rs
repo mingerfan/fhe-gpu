@@ -6,14 +6,9 @@
 //!
 //! # Negacyclic NTT
 //! The standard NTT computes convolution mod `x^n - 1`. For RLWE we need
-//! mod `x^n + 1` (negacyclic). This is achieved by pre-multiplying with
-//! "twist" factors before a standard cyclic NTT.
-//!
-//! Important: the backend currently wrapped by `crate::ntt::NttPlan` is
-//! `concrete_ntt::prime64::Plan`, which already implements a direct
-//! negacyclic NTT. So the textbook "twist + standard NTT" derivation is the
-//! math model, but the concrete call path should not apply an extra twist on
-//! top of a direct negacyclic backend.
+//! mod `x^n + 1` (negacyclic). In this crate the main `crate::ntt::NttPlan`
+//! uses a learning-oriented "twist + cyclic NTT" framework with
+//! `forward = DIF` and `inverse = DIT`.
 //!
 //! # Learning Resources
 //! - [EN] RLWE and the polynomial ring: https://eprint.iacr.org/2012/230.pdf §2
@@ -32,9 +27,9 @@ pub enum Domain {
     Coefficient,
     /// Negacyclic NTT/evaluation form.
     ///
-    /// Under the current `concrete-ntt` backend this should be understood as
-    /// the backend's negacyclic frequency-domain layout, not necessarily as
-    /// "natural-order evaluations at points 0..n-1".
+    /// Under the current self-written framework, this should be read as
+    /// "NTT-domain storage"; the exact index layout may be bit-reversed unless
+    /// the caller explicitly applies the standalone bit-reversal permutation.
     Ntt,
 }
 
@@ -140,10 +135,9 @@ impl Poly {
     /// before forward NTT, multiply coeff[i] by ψ^i where ψ is a primitive
     /// 2n-th root of unity in Z_q, then apply a standard length-n NTT.
     ///
-    /// Backend note:
-    /// `NttPlan` currently wraps a direct negacyclic NTT implementation, so if
-    /// we keep using that backend this method should *not* apply an additional
-    /// manual twist.
+    /// Implementation note:
+    /// `NttPlan` is expected to perform the pre-twist internally, so callers
+    /// should not manually multiply by `ψ^i` again around this method.
     /// ```
     ///
     /// # Learning Resources
@@ -153,7 +147,7 @@ impl Poly {
         if self.domain == Domain::Ntt {
             return Ok(());
         }
-        todo!("for a direct negacyclic backend, call plan.forward() without an extra twist; if switching to a cyclic backend, apply ψ^i first")
+        todo!("call plan.forward_to_bitrev() and decide whether Poly should record layout explicitly")
     }
 
     /// Convert this polynomial from NTT domain back to coefficient form.
@@ -161,7 +155,7 @@ impl Poly {
         if self.domain == Domain::Coefficient {
             return Ok(());
         }
-        todo!("for a direct negacyclic backend, call plan.inverse() without an extra untwist; if switching to a cyclic backend, multiply by ψ^(-i) afterwards")
+        todo!("call plan.inverse_from_bitrev() and mark the polynomial as being in coefficient domain")
     }
 }
 
